@@ -2,7 +2,8 @@
 data/
 .vscode/
 notebooks/temp/
-
+__init__.py*
+temp/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
