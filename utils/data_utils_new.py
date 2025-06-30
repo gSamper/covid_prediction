@@ -5,8 +5,7 @@ from typing import Tuple, Union, Type
 from sklearn.preprocessing import MinMaxScaler, StandardScaler
 
 
-def format_policy_data(df: pd.DataFrame, id_vars = ['CountryCode', 'CountryName', 'RegionCode', 'RegionName', 'CityCode',
-        'CityName', 'Jurisdiction'], sort_by= "CountryName") -> pd.DataFrame:
+def format_policy_data(df: pd.DataFrame) -> pd.DataFrame:
     """Function to format the policy data from OxCGRT. 
     First, it converts the data to a long format, 
     then it converts the date column to a datetime format, 
@@ -20,18 +19,18 @@ def format_policy_data(df: pd.DataFrame, id_vars = ['CountryCode', 'CountryName'
     """
     
     #variables que no son dates
-    # id_vars = ['CountryCode', 'CountryName', 'RegionCode', 'RegionName', 'CityCode',
-    #     'CityName', 'Jurisdiction']
+    id_vars = ['CountryCode', 'CountryName', 'RegionCode', 'RegionName', 'CityCode',
+        'CityName', 'Jurisdiction']
     #convertir a long format, una fila per cada data
     df_long = df.melt(id_vars=id_vars, var_name='Date', value_name='Value')
     #convertir a datetime format
     df_long['Date'] = pd.to_datetime(df_long['Date'], format='%d%b%Y')
     #ordenar per pais i data
-    df_long = df_long.sort_values(by=[sort_by, 'Date'])
+    df_long = df_long.sort_values(by=['CountryName', 'Date'])
    
     return df_long
 
-def create_sequences(data: pd.DataFrame, target_column: str, feature_columns:list, seq_length=3):
+def create_sequences_new(data: pd.DataFrame, target_column: str, endog_columns :list, policy_columns :list, seq_length=3):
     """Creates sequence data for LSTM models.
     This function takes a DataFrame and creates sequences of features and targets for 
     time series forecasting.
@@ -42,29 +41,33 @@ def create_sequences(data: pd.DataFrame, target_column: str, feature_columns:lis
     Args:
         data (pd.DataFrame): Data for training from one country in specific
         target_column (str): Column name for the target column of the data df.
-        feature_columns (list): List of names of the feature columns.
+        endog_columns (list): List of names of the columns realted to cases.
+        exog_columns (list): List of names of the columns related to policies.
         seq_length (int, optional): _description_. Defaults to 3.
 
     Returns:
         _type_: _description_
     """
-    X, y = [], []
+    X_endog, X_exog, y = [], [], []
+
     for i in range(len(data) - seq_length):
-        # Get the sequence of features (past `seq_length` days)
-        x_seq = data[feature_columns].iloc[i: i + seq_length].values  # Shape: (seq_length, num_features)
-        X.append(x_seq)
+        # Sequence of endogenous features (e.g., new_cases, deaths)
+        x_seq = data[endog_columns].iloc[i: i + seq_length].values  # Shape: (seq_length, num_endog_features)
+        X_endog.append(x_seq)
 
-        # Get the target for the next time step (new_cases)
-        y.append(data[target_column].iloc[i + seq_length])  # Shape: (1,)
+        # Policy features at prediction time (exogenous)
+        x_policy = data[policy_columns].iloc[i + seq_length].values  # Shape: (num_policy_features,)
+        X_exog.append(x_policy)
 
-    return np.array(X), np.array(y)
+        # Target value at prediction time
+        y_target = data[target_column].iloc[i + seq_length]
+        y.append(y_target)
+    return X_endog, X_exog, y
 
-def scale_data_per_country(df: pd.DataFrame, countries: list, feature_columns: list, 
+def scale_data_per_country_new(df: pd.DataFrame, countries: list, feature_columns: list, 
                             target_column: str, scaler: Union[Type[MinMaxScaler], 
-                            Type[StandardScaler]], seq_length: int = 4) -> Tuple[np.ndarray, 
-                                                                                  np.ndarray, 
-                                                                                  np.ndarray, 
-                                                                                  np.ndarray]:
+                            Type[StandardScaler]], endog_columns: list, policy_columns: list, 
+                            seq_length: int = 4):
     """
     Scales the feature and target columns separately for each country using the specified scaler
     and prepares the data for sequence modeling.
@@ -77,15 +80,8 @@ def scale_data_per_country(df: pd.DataFrame, countries: list, feature_columns: l
         scaler (Union[Type[MinMaxScaler], Type[StandardScaler]]): The scaler class to be used for normalization.
         seq_length (int): The sequence length for LSTM input.
 
-    Returns:
-        Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]: A tuple containing:
-            - y_train (np.ndarray): Target values for the training set.
-            - y_test (np.ndarray): Target values for the test set.
-            - X_train (np.ndarray): Scaled feature sequences for the training set.
-            - X_test (np.ndarray): Scaled feature sequences for the test set.
     """
-
-    X_list, y_list = [], []
+    X_endog, X_exog, y_list = [], [], []
 
     for country in countries:
         # Filter data per country
@@ -108,17 +104,17 @@ def scale_data_per_country(df: pd.DataFrame, countries: list, feature_columns: l
         scaled_data = pd.concat([scaled_features_df, scaled_target_df], axis=1)
 
         # Create sequences using the scaled data
-
-        X, y = create_sequences(scaled_data, target_column, feature_columns, seq_length)
-
-        X_list.append(X)
+        X_endog_part, X_exog_part, y = create_sequences_new(scaled_data, target_column, endog_columns, policy_columns, seq_length)
+        X_endog.append(X_endog_part)
+        X_exog.append(X_exog_part)
         y_list.append(y)
 
     # Combine sequences from all countries
-    X_all = np.vstack(X_list)
+    X_all_endog = np.vstack(X_endog)
+    X_all_exog = np.vstack(X_exog)
     y_all = np.hstack(y_list)
 
-    return y_all, X_all
+    return y_all, X_all_endog, X_all_exog
 
 def get_pd_from_pkl(path: str) -> pd.DataFrame:
     

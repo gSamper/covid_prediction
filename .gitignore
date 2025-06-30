@@ -4,6 +4,10 @@ data/
 notebooks/temp/
 __init__.py*
 temp/
+country_plots/
+notebooks/similarity_measures/
+results/similarity_measures/
+TOP5_configs.txt
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
